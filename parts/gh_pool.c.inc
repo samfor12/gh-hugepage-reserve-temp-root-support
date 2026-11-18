@@ -369,6 +369,7 @@ struct page *gh_pool_avail_to_served(void *mm, pid_t tgid)
 	GH_CTR_ADD(o->served, 1);
 	pg = pfn_to_page(gh_pfn_of_idx(idx));
 	get_page(pg);					/* protection ref (§3.2) */
+	gh_page_unreserve(pg);			/* VM frees it normally: no bad_page on reserved */
 	gh_spin_unlock(&gh_pool_lock, &fl);
 	gh_read_unlock(&gh_pid_lock);
 	return pg;
