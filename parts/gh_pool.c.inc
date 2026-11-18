@@ -60,6 +60,12 @@ static void gh_purge_log_add(unsigned long pfn, pid_t tgid, int count_now)
 }
 #ifndef GH_MOCK				/* kernel: prefill-done / worker-quiescent flag (§8/§9) */
 static bool gh_pool_ready_flag;
+/* temp-root pool-page pinning: keep pool pages out of MOVABLE pageblocks so
+ * memory pressure cannot migrate/steal them back to apps. Pin on entry,
+ * unpin just before every __free_pages (mirrors the v11 temp-root fork). */
+static inline void gh_page_reserve(struct page *page) { SetPageReserved(page); }
+static inline void gh_page_unreserve(struct page *page) { ClearPageReserved(page); }
+
 bool gh_pool_ready(void) { return GH_READ_ONCE(gh_pool_ready_flag); }
 void gh_pool_set_ready(bool v) { gh_pool_ready_flag = v; }
 #endif
@@ -200,6 +206,7 @@ static bool gh_avail_in(unsigned long pfn, u8 expect, u8 origin)
 	bidx = gh_blk_base(idx);
 	before = gh_classify(bidx);
 	gh_set_state(s, GH_AVAIL);
+	gh_page_reserve(pfn_to_page(pfn));
 	s->origin = origin;
 	after = gh_classify(bidx);
 	gh_rehome(bidx, before, after, idx);	/* siblings follow; self not listed yet */
@@ -572,6 +579,7 @@ int gh_pool_avail_to_ext(int n)
 				  gh_classify(gh_blk_base(idx)), GH_NIL);
 		gh_spin_unlock(&gh_pool_lock, &fl);
 		pg = pfn_to_page(gh_pfn_of_idx(idx));
+		gh_page_unreserve(pg);
 		__free_pages(pg, GH_PAGE_ORDER);	/* outside the lock */
 		shed++;
 	}
@@ -600,6 +608,7 @@ bool gh_pool_released_to_avail_sweep(unsigned long pfn)
 		gh_released_oldest = 0;
 	gh_spin_unlock(&gh_pool_lock, &fl);
 	if (!ok)
+		gh_page_unreserve(pfn_to_page(pfn));
 		__free_pages(pfn_to_page(pfn), GH_PAGE_ORDER);
 	return ok;
 }
@@ -823,6 +832,7 @@ bool gh_pool_ext_to_cand(unsigned long pfn, int noretry)
 	if (s->state != GH_EXT) {			/* re-validate (§2) */
 		gh_dbg_reject++;
 		gh_spin_unlock(&gh_pool_lock, &fl);
+		gh_page_unreserve(pfn_to_page(pfn));
 		__free_pages(pfn_to_page(pfn), GH_PAGE_ORDER);
 		return false;
 	}
@@ -849,8 +859,10 @@ bool gh_pool_ext_to_cand(unsigned long pfn, int noretry)
 		nv = gh_promote_locked(bidx, victims, GH_CAND_MAX);
 	gh_spin_unlock(&gh_pool_lock, &fl);
 	if (evict_pfn != GH_PFN_NONE)
+		gh_page_unreserve(pfn_to_page(evict_pfn));
 		__free_pages(pfn_to_page(evict_pfn), GH_PAGE_ORDER);
 	for (i = 0; i < nv; i++)
+		gh_page_unreserve(pfn_to_page(victims[i]));
 		__free_pages(pfn_to_page(victims[i]), GH_PAGE_ORDER);
 	return true;
 }
@@ -873,6 +885,7 @@ int gh_pool_cand_to_ext(void)
 	gh_cand_n = 0;
 	gh_spin_unlock(&gh_pool_lock, &fl);
 	for (i = 0; i < n; i++)
+		gh_page_unreserve(pfn_to_page(pfns[i]));
 		__free_pages(pfn_to_page(pfns[i]), GH_PAGE_ORDER);
 	return n;
 }
@@ -936,6 +949,7 @@ int gh_pool_ext_to_avail(enum gh_how how, unsigned long at_pfn,
 				accepted++;
 			else {
 				gh_spin_unlock(&gh_pool_lock, &fl);
+				gh_page_unreserve(pfn_to_page(sub));
 				__free_pages(pfn_to_page(sub), GH_PAGE_ORDER);
 				gh_spin_lock(&gh_pool_lock, &fl);
 			}
@@ -954,6 +968,7 @@ int gh_pool_ext_to_avail(enum gh_how how, unsigned long at_pfn,
 			accepted = 1;
 		else {
 			gh_spin_unlock(&gh_pool_lock, &fl);
+			gh_page_unreserve(pg);
 			__free_pages(pg, GH_PAGE_ORDER);
 			return 0;
 		}
@@ -969,6 +984,7 @@ int gh_pool_ext_to_avail(enum gh_how how, unsigned long at_pfn,
 			accepted = 1;
 		else {
 			gh_spin_unlock(&gh_pool_lock, &fl);
+			gh_page_unreserve(pg);
 			__free_pages(pg, GH_PAGE_ORDER);
 			return 0;
 		}
@@ -988,6 +1004,7 @@ int gh_pool_ext_to_avail(enum gh_how how, unsigned long at_pfn,
 			accepted = 1;
 		else {
 			gh_spin_unlock(&gh_pool_lock, &fl);
+			gh_page_unreserve(pfn_to_page(pfn));
 			__free_pages(pfn_to_page(pfn), GH_PAGE_ORDER);
 			return 0;
 		}
@@ -1181,6 +1198,7 @@ static void gh_free_to_cma(unsigned long pfn)
 	struct page *head = pfn_to_page(pfn);
 
 	set_page_count(head, 1);
+	gh_page_unreserve(head);
 	__free_pages(head, GH_PAGE_ORDER);
 }
 
@@ -1316,6 +1334,7 @@ int gh_pool_cma_to_avail(int n)
 			gh_spin_lock(&gh_pool_lock, &fl);
 			if (!gh_avail_in(sub, GH_CMA, GH_IN_CMA)) {
 				gh_spin_unlock(&gh_pool_lock, &fl);
+				gh_page_unreserve(pfn_to_page(sub));
 				__free_pages(pfn_to_page(sub), GH_PAGE_ORDER);
 				continue;
 			}
@@ -1351,6 +1370,7 @@ int gh_pool_cma_to_ext(int n)
 			unsigned long sub = base + ((unsigned long)i << GH_PAGE_ORDER);
 
 			gh_rebuild_order9(pfn_to_page(sub));
+			gh_page_unreserve(pfn_to_page(sub));
 			__free_pages(pfn_to_page(sub), GH_PAGE_ORDER);
 		}
 		got++;
