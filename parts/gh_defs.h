@@ -26,7 +26,7 @@
  * rounds scan it after expiry with no reliance on self-extension — hence
  * ROUNDS-2, and ROUNDS must stay >= 2 (compile-time constants: re-check this
  * pairing whenever either changes). */
-#define GH_RELEASE_ROUNDS	5			/* rounds armed per VM event (1s each) */
+#define GH_RELEASE_ROUNDS	15			/* rounds armed per VM event (1s each); no-hook teardown needs a long death grace */
 #define GH_DEATH_GRACE_SEC	(GH_RELEASE_ROUNDS - 2)
 _Static_assert(GH_RELEASE_ROUNDS >= 2, "death grace needs ROUNDS >= 2");
 #define GH_VM_OWNER_MAX		8
