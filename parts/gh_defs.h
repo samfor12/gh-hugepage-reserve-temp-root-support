@@ -29,6 +29,8 @@
 #define GH_RELEASE_ROUNDS	5			/* rounds armed per VM event (1s each) */
 #define GH_DEATH_GRACE_SEC	(GH_RELEASE_ROUNDS - 2)
 _Static_assert(GH_RELEASE_ROUNDS >= 2, "death grace needs ROUNDS >= 2");
+
+bool gh_free_hook_active(void);	/* gh_hooks.c.inc (kernel) / tests/mock_kapi.c.inc (mock) */
 #define GH_VM_OWNER_MAX		8
 #define GH_COMM_LEN		16
 

@@ -537,8 +537,9 @@ int gh_pool_released_to_ext(enum gh_exmode mode)
 	unsigned long fl;
 	u32 idx, now = gh_now_sec(), new_oldest = 0;
 	int done = 0;
+	bool no_hook = !gh_free_hook_active();	/* temp-root: hook absent -> reclaim immediately */
 
-	if (mode == GH_EXPIRED &&
+	if (mode == GH_EXPIRED && !no_hook &&
 	    (GH_READ_ONCE(gh_nstate[GH_RELEASED]) == 0 ||
 	     (u32)(now - GH_READ_ONCE(gh_released_oldest)) < GH_GRACE_SEC))
 		return 0;				/* O(1) gate */
@@ -548,7 +549,7 @@ int gh_pool_released_to_ext(enum gh_exmode mode)
 
 		if (!s || GH_READ_ONCE(s->state) != GH_RELEASED)
 			continue;
-		if (mode == GH_EXPIRED &&
+		if (mode == GH_EXPIRED && !no_hook &&
 		    (u32)(now - GH_READ_ONCE(s->released_at)) < GH_GRACE_SEC) {
 			u32 ra = GH_READ_ONCE(s->released_at);
 
