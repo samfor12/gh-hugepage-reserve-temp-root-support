@@ -18,8 +18,6 @@ static int mock_floor_mb = 0;		/* 0 = legacy scripted verdict; >0 =
 					 * express that) */
 static long mock_evicted;				/* evict_range invocations */
 
-bool gh_free_hook_active(void) { return mock_free_hook_armed != 0; }
-
 static inline u8 *mock_mt_slot(unsigned long pfn)
 {
 	return &mock_mt[(pfn - MOCK_BASE_PFN) >> mock_pb_order];
